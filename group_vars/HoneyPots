@@ -1,0 +1,5 @@
+sniffing_interface: eth0
+sniffing_interface_type: 100M
+log_dir: /var/log/suricata/
+log_dir_files: /var/log/suricata/files/
+log_dir_certs: /var/log/suricata/certs/

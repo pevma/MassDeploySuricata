@@ -1,0 +1,19 @@
+#!/bin/bash
+
+ethtool -K {{ sniffing_interface }} tso off
+ethtool -K {{ sniffing_interface }} gro off
+ethtool -K {{ sniffing_interface }} lro off
+ethtool -K {{ sniffing_interface }} gso off
+ethtool -K {{ sniffing_interface }} rx off
+ethtool -K {{ sniffing_interface }} tx off
+ethtool -K {{ sniffing_interface }} sg off
+ethtool -K {{ sniffing_interface }} rxvlan off
+ethtool -K {{ sniffing_interface }} txvlan off
+{% if sniffing_interface_type == "10G" %}
+ethtool -N {{ sniffing_interface }} rx-flow-hash udp4 sdfn
+ethtool -N {{ sniffing_interface }} rx-flow-hash udp6 sdfn
+ethtool -n {{ sniffing_interface }} rx-flow-hash udp6
+ethtool -n {{ sniffing_interface }} rx-flow-hash udp4
+ethtool -C {{ sniffing_interface }} rx-usecs 1000
+ethtool -C {{ sniffing_interface }} adaptive-rx off
+{% endif %}

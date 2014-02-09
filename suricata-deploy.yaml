@@ -1,0 +1,230 @@
+########
+# On the central machine:
+# sudo apt-get install python-yaml python-jinja2 python-paramiko python-crypto python-keyczar ansible
+#
+#######
+# On the remote (to be managed) machine:
+# sudo apt-get install python-keyczar
+#
+########
+# NOTE: python-keyczar must be installed on the control (central AND remote) machine to use accelerated modes
+#
+#Released under GPLv2 - a copy of which can be found in the LICESNE file
+#Author: Peter Manev <peter.manev@openinfosecfoundation.org>
+#
+# THIS SET UP IS FOR DEBIAN/UBUNTU LIKE SYSTEMS !!
+
+
+    - hosts: all 
+      # you can also use "- hosts: HoneyPots", but
+      # make sure you have that defined in your hosts file,
+      # and check the variables in "group_vars" folder ,
+      # otherwise it will be done on ALL machines defind in the hosts file
+      serial: 5 #parallel execution
+      accelerate: true #fast secure execution
+      tasks:
+        - name: Ensure Suricata, Ansible latest dev build dependencies are installed plus some more tools
+          apt: pkg={{item}} state=latest update-cache=yes
+          with_items:
+            - build-essential
+            - git-core
+            - libnss3-dev 
+            - libnspr4-dev
+            - libpcre3 
+            - libpcre3-dbg 
+            - libpcre3-dev
+            - autoconf 
+            - automake
+            - libtool 
+            - libpcap-dev 
+            - libnet1-dev
+            - libyaml-0-2
+            - libyaml-dev 
+            - pkg-config 
+            - zlib1g 
+            - zlib1g-dev 
+            - libcap-ng-dev 
+            - libcap-ng0
+            - libgeoip1
+            - libgeoip-dev
+            - make 
+            - libmagic-dev
+            - flex 
+            - bison 
+            - subversion 
+            - ethtool
+            - htop
+            - chkconfig
+            - lshw
+            - mc
+            - python-keyczar
+            - tcpdump
+            - iptraf
+            - iftop
+            - tcpstat
+            - bwm-ng
+            - traceroute
+            - python-apt
+            - aptitude
+            - perl
+            - perl-modules
+            - wget
+          tags: 
+            - deploy-packages
+            - update-upgrade-packages
+          sudo: yes
+          
+        
+        - name: Update/upgrade all packages to the latest version
+          apt: update_cache=yes upgrade=dist
+          async: 1200 #fire and forget - wait up to 20 min for the job to finish
+          poll: 10 #check every 10 sec if the job is done
+          sudo: yes
+          tags:
+            - update-upgrade-packages
+            
+        
+        - name: Ensure Suricata latest GIT is pulled/cloned
+          git: repo=git://phalanx.openinfosecfoundation.org/oisf.git 
+            dest=/opt/oisf
+            update=yes
+          retries: 3 #upon err, it will retrying the task 3 times,
+          delay: 4 # 4 seconds apart
+          sudo: yes
+          tags: git-pull-suricata
+          
+        
+        - name: Ensure libhtp latest GIT master is pulled/cloned
+          git: repo=https://github.com/ironbee/libhtp.git  
+            dest=/opt/oisf/libhtp
+            version=0.5.x 
+            update=yes
+          retries: 3
+          delay: 4
+          sudo: yes
+          tags: 
+            - git-pull-libhtp
+            - git-pull-suricata
+            
+        
+        - name: Check if Suricata process is runnning 
+          command: pgrep Suricata
+          ignore_errors: True #if err occurs, do not stop the whole execution
+          register: suricata_process_rc_code
+          sudo: yes
+          tags:
+            - check-suricata-process
+            - kill-suricata-process
+            - compile-suricata
+            
+        
+        - name: IF there is Suricata process runnning - kill it before we compile
+          command: "kill -9 {{suricata_process_rc_code.stdout}}"
+          when: ( suricata_process_rc_code|success )
+          ignore_errors: True #if err occurs, do not stop the whole execution
+          sudo: yes
+          tags:
+            - kill-suricata-process
+            - compile-suricata
+            
+        
+        - name: Execute autogen.sh - latest Suricata dev edition from git
+          shell: ./autogen.sh chdir=/opt/oisf 
+          async: 480 #fire and forget - wait up to 8 min for the job to finish
+          poll: 10 #check every 10 sec if the job is done
+          sudo: yes
+          tags: compile-suricata
+          
+        
+        - name: Configure latest Suricata dev edition from git
+          shell: "./configure \
+            --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+            --disable-gccmarch-native \
+            --enable-geoip \
+            --with-libnss-libraries=/usr/lib \
+            --with-libnss-includes=/usr/include/nss/ \
+            --with-libnspr-libraries=/usr/lib \
+            --with-libnspr-includes=/usr/include/nspr  chdir=/opt/oisf "
+          async: 720 #fire and forget - wait up to 12 min for the job to finish
+          poll: 10 #check every 10 sec if the job is done
+          sudo: yes
+          tags: compile-suricata
+          
+        
+        - name: Compile and make install-conf the latest Suricata dev edition from git
+          shell: make clean && make && make install && make install-conf && ldconfig chdir=/opt/oisf
+          async: 2400 #fire and forget - wait up to 40 min for the job to finish
+          poll: 10 #check every 10 sec if the job is done
+          sudo: yes
+          tags: compile-suricata
+          
+        
+        - name: DISABLE - Network sniffing interface offloading
+          command: "{{item}} chdir=/opt"
+          with_items:
+            - ethtool -K {{sniffing_interface}} tso off
+            - ethtool -K {{sniffing_interface}} gro off
+            - ethtool -K {{sniffing_interface}} lro off
+            - ethtool -K {{sniffing_interface}} gso off
+            - ethtool -K {{sniffing_interface}} rx off
+            - ethtool -K {{sniffing_interface}} tx off
+            - ethtool -K {{sniffing_interface}} sg off
+            - ethtool -K {{sniffing_interface}} rxvlan off
+            - ethtool -K {{sniffing_interface}} txvlan off
+            # the value of the variable {{sniffing_interface}} is taken from
+            # the definitions in the "group_vars" folder
+          ignore_errors: True #if err occurs, do not stop the whole execution
+          sudo: yes
+          tags: 
+            - disable-network-offloading
+            - deploy-packages
+            #this above is how you do multiple tags
+            
+        
+        - name: Check if irqbalance is enabled
+          command: chkconfig -t irqbalance
+          register: chkconfig_status
+          sudo: yes
+          tags: disable-network-offloading
+          
+        
+        - name: DISABLE irqbalance if enabled
+          command: chkconfig irqbalance off
+          ignore_errors: True #if err occurs, do not stop the whole execution
+          when: chkconfig_status.stdout.find("irqbalance  on") != -1
+          sudo: yes
+          tags: disable-network-offloading 
+          
+        
+        - name: Deploy suricata.yaml from jinja2 template
+          template: src=templates/suricata.yaml.j2 dest=/etc/suricata/suricata.yaml mode=0640 owner=root group=root
+          sudo: yes
+          tags: deploy-confs
+          # this will deploy and configure the suricata.yaml to the machines
+          # out of a jinja2 template.
+          # Again values that are to be used in the template 
+          # (found itself under folder "templates") are taken from the 
+          # the definitions in the "group_vars" folder
+          
+        
+        - name: Deploy disable-network-offloading.sh from jinja2 template
+          template: src=templates/disable-network-offload.sh.j2 dest=/opt/disable-network-offload.sh 
+                    mode=755 
+                    owner=root 
+                    group=root
+          sudo: yes
+          tags:
+            - deploy-cronjobs
+            
+        
+        # Found on the remote machine under /var/spool/cron/crontab
+        - cron: name="add cronjob at reboot - disbale network offload" 
+                special_time=reboot 
+                job="/opt/disable-network-offload.sh"
+          sudo: yes
+          tags:
+            - deploy-cronjobs
+          
+        
+        
+        
