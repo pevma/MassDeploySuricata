@@ -163,7 +163,7 @@
           
         
         - name: Compile and make install-conf the latest Suricata dev edition from git
-          shell: make clean && make && make install && make install-conf && ldconfig chdir=/opt/oisf
+          shell: make clean && make && make install-conf && ldconfig chdir=/opt/oisf
           async: 2400 #fire and forget - wait up to 40 min for the job to finish
           poll: 10 #check every 10 sec if the job is done
           sudo: yes
